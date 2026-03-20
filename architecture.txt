@@ -1,0 +1,58 @@
+anomaly-detection-audio/
+│
+├── data/
+│   ├── raw/                        # Áudios originais (qualquer formato, multicanal, etc.)
+│   ├── standardized/               # Após padronização (WAV, mono, 48/192kHz, canais separados)
+│   │   ├── drill01/
+│   │   ├── drill02/
+│   │   └── ...
+│   ├── segmented/                  # Após corte por furo (arquivos nomeados conforme padrão)
+│   │   ├── drill01/
+│   │   └── drill02/
+│   ├── metadata/                   # CSVs de metadados
+│   │   ├── segmented_metadata.csv  # drill_id, hole_idx, mic_type, mic_id, position, jam, filepath...
+│   │   └── datalogger_signals.csv  # tensões/correntes sincronizadas
+│   ├── features/                   # Features extraídas (MFCCs, espectrogramas, embeddings...)
+│   └── splits/                     # Divisão treino/val/teste
+│       ├── train_ids.txt
+│       ├── val_ids.txt
+│       └── test_ids.txt
+│
+├── notebooks/
+│   ├── 01_visualizacao_audio.ipynb
+│   ├── 02_preprocessamento.ipynb
+│   ├── 03_segmentacao_furos.ipynb
+│   └── 04_extracao_features.ipynb
+│
+├── src/
+│   ├── __init__.py
+│   ├── config/
+│   │   └── settings.py
+│   ├── preprocessing/              # Scripts do passo a passo
+│   │   ├── convert.py              # Converter para WAV, separar canais
+│   │   ├── segregate.py            # Organizar por instrumentação (interno/externo, comum/ultra)
+│   │   ├── segment.py              # Segmentar por furo (usando energia + jams.txt)
+│   │   └── metadata.py             # Criar CSV de metadados
+│   ├── features/
+│   │   ├── mfcc.py
+│   │   ├── spectrogram.py
+│   │   └── embeddings.py
+│   ├── models/
+│   │   ├── autoencoder.py
+│   │   └── isolation_forest.py
+│   ├── training/
+│   │   └── train.py
+│   └── utils/
+│       └── signal_utils.py
+│
+├── tests/
+│   └── test_preprocessing.py
+│
+├── outputs/
+│   ├── logs/
+│   ├── models/
+│   └── reports/
+│
+├── requirements.txt
+├── README.md
+└── .gitignore
