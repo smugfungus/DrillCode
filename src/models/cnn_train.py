@@ -261,11 +261,52 @@ plt.plot([0,1],[0,1],'--')
 plt.savefig(RESULT_DIR / "roc_curve.png")
 plt.close()
 
-# Prediction vs Time
-order = np.argsort(all_holes)
+# =========================================
+# PREDICTION VS TIME (MELHORADO)
+# =========================================
 
-plt.plot(np.array(all_holes)[order], np.array(all_preds)[order])
-plt.scatter(np.array(all_holes)[order], np.array(all_labels)[order])
+holes = np.array(all_holes)
+probs = np.array(all_preds)
+labels = np.array(all_labels)
+
+order = np.argsort(holes)
+
+holes_sorted = holes[order]
+probs_sorted = probs[order]
+labels_sorted = labels[order]
+
+plt.figure(figsize=(10,5))
+
+# Scatter com cores por classe
+plt.scatter(
+    holes_sorted,
+    probs_sorted,
+    c=labels_sorted,
+    cmap="coolwarm",  # azul = 0 | vermelho = 1
+    alpha=0.5,
+    s=15,
+    label="Samples"
+)
+
+# Média móvel (tendência)
+window = 20
+rolling_mean = pd.Series(probs_sorted).rolling(window).mean()
+
+plt.plot(
+    holes_sorted,
+    rolling_mean,
+    linewidth=2,
+    label="Trend (moving average)"
+)
+
+plt.xlabel("Hole Index (Tool Life)")
+plt.ylabel("Failure Probability")
+plt.title(f"Prediction vs Time ({TARGET})")
+
+plt.legend()
+plt.grid()
+
+plt.tight_layout()
 plt.savefig(RESULT_DIR / "prediction_vs_time.png")
 plt.close()
 

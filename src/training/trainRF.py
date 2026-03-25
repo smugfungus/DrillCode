@@ -225,7 +225,7 @@ plt.savefig(f"{RESULT_DIR}/feature_importance_{TARGET}.png")
 plt.close()
 
 # -----------------------------
-# PREDICTION VS TIME
+# PREDICTION VS TIME (MELHORADO)
 # -----------------------------
 order = np.argsort(hole_idx_test)
 
@@ -235,17 +235,26 @@ true_sorted = y_test[order]
 
 plt.figure(figsize=(10,5))
 
-plt.plot(
-    hole_idx_sorted,
-    prob_sorted,
-    label="Predicted Probability"
-)
-
+# Scatter com cor por classe
 plt.scatter(
     hole_idx_sorted,
-    true_sorted,
-    color="red",
-    label="Actual Failure"
+    prob_sorted,
+    c=true_sorted,
+    cmap="coolwarm",   # azul = 0 | vermelho = 1
+    alpha=0.5,
+    s=15,
+    label="Samples"
+)
+
+# Média móvel (tendência)
+window = 20
+rolling_mean = pd.Series(prob_sorted).rolling(window).mean()
+
+plt.plot(
+    hole_idx_sorted,
+    rolling_mean,
+    linewidth=2,
+    label="Trend (moving average)"
 )
 
 plt.xlabel("Hole Index (Tool Life)")
@@ -253,8 +262,8 @@ plt.ylabel("Failure Probability")
 plt.title(f"Prediction vs Time ({TARGET})")
 plt.legend()
 plt.grid()
-plt.tight_layout()
 
+plt.tight_layout()
 plt.savefig(f"{RESULT_DIR}/prediction_vs_time_{TARGET}.png")
 plt.close()
 
