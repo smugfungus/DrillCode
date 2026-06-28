@@ -9,7 +9,7 @@ venv/
 *.iml
 *.log
 data/*
-!data/metadata/**
+!data/metadata/
 !data/features/.gitkeep
 !data/raw/.gitkeep
 !data/segmented/.gitkeep
@@ -19,3 +19,4 @@ data/*
 notebooks/data/*
 fix_matplotlib_bug.py
 docs/img/*
+results/

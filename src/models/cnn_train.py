@@ -27,7 +27,7 @@ torch.manual_seed(SEED)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TARGET = "fail_in_5"  # altere aqui
+TARGET = "fail_in_5"
 
 EXCLUDE_DRILLS = [1, 2, 3]
 TEST_DRILLS = 5
@@ -43,7 +43,6 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 # =========================================
 
 df = pd.read_csv(META_PATH)
-
 df = df[~df["drill_id"].isin(EXCLUDE_DRILLS)]
 
 drills = df["drill_id"].unique()
@@ -54,7 +53,6 @@ train_drills = [d for d in drills if d not in test_drills]
 train_df = df[df["drill_id"].isin(train_drills)]
 test_df  = df[df["drill_id"].isin(test_drills)]
 
-# validação interna
 val_drills = random.sample(list(train_df["drill_id"].unique()), 2)
 
 val_df = train_df[train_df["drill_id"].isin(val_drills)]
@@ -84,19 +82,11 @@ class SpectrogramDataset(Dataset):
         return spec, label, row["hole_idx"]
 
 # =========================================
-# DATALOADER
-# =========================================
-
-train_loader = DataLoader(SpectrogramDataset(train_df), batch_size=32, shuffle=True)
-val_loader   = DataLoader(SpectrogramDataset(val_df), batch_size=32)
-test_loader  = DataLoader(SpectrogramDataset(test_df), batch_size=32)
-
-# =========================================
 # MODEL
 # =========================================
 
 class CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout=0.4):
         super().__init__()
 
         self.features = nn.Sequential(
@@ -119,7 +109,7 @@ class CNN(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(64, 32),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(dropout),
             nn.Linear(32, 1)
         )
 
@@ -127,8 +117,6 @@ class CNN(nn.Module):
         x = self.features(x)
         x = torch.flatten(x, 1)
         return self.classifier(x)
-
-model = CNN().to(DEVICE)
 
 # =========================================
 # LOSS
@@ -139,14 +127,100 @@ neg = len(train_df) - pos
 pos_weight = torch.tensor(neg / pos).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 # =========================================
-# TRAIN
+# QUICK TRAIN (RANDOM SEARCH)
 # =========================================
+
+def quick_train_eval(model, optimizer, train_loader, val_loader, epochs=8):
+
+    for _ in range(epochs):
+        model.train()
+        for x, y, _ in train_loader:
+            x, y = x.to(DEVICE), y.to(DEVICE)
+
+            optimizer.zero_grad()
+            logits = model(x).squeeze()
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+
+    model.eval()
+    all_preds, all_labels = [], []
+
+    with torch.no_grad():
+        for x, y, _ in val_loader:
+            x = x.to(DEVICE)
+            logits = model(x).squeeze()
+            probs = torch.sigmoid(logits)
+
+            all_preds.extend(probs.cpu().numpy())
+            all_labels.extend(y.numpy())
+
+    preds_bin = (np.array(all_preds) > 0.5).astype(int)
+    return f1_score(all_labels, preds_bin)
+
+# =========================================
+# RANDOM SEARCH
+# =========================================
+
+print("\n=== RANDOM SEARCH ===")
+
+search_space = {
+    "lr": [1e-3, 5e-4, 1e-4],
+    "batch_size": [16, 32],
+    "dropout": [0.2, 0.4]
+}
+
+N_TRIALS = 5
 
 best_f1 = 0
-EPOCHS = 20
+best_config = None
+
+for trial in range(N_TRIALS):
+
+    config = {
+        "lr": random.choice(search_space["lr"]),
+        "batch_size": random.choice(search_space["batch_size"]),
+        "dropout": random.choice(search_space["dropout"])
+    }
+
+    print(f"\nTrial {trial+1}: {config}")
+
+    train_loader_tmp = DataLoader(SpectrogramDataset(train_df), batch_size=config["batch_size"], shuffle=True)
+    val_loader_tmp   = DataLoader(SpectrogramDataset(val_df), batch_size=config["batch_size"])
+
+    model_tmp = CNN(dropout=config["dropout"]).to(DEVICE)
+    optimizer_tmp = torch.optim.Adam(model_tmp.parameters(), lr=config["lr"])
+
+    f1 = quick_train_eval(model_tmp, optimizer_tmp, train_loader_tmp, val_loader_tmp)
+
+    print(f"F1: {f1:.4f}")
+
+    if f1 > best_f1:
+        best_f1 = f1
+        best_config = config
+
+# fallback segurança
+if best_config is None:
+    best_config = {"lr": 1e-3, "batch_size": 32, "dropout": 0.4}
+
+print("\nBest config:", best_config)
+
+# =========================================
+# TREINO FINAL
+# =========================================
+
+print("\n=== TREINO FINAL ===")
+
+train_loader = DataLoader(SpectrogramDataset(train_df), batch_size=best_config["batch_size"], shuffle=True)
+val_loader   = DataLoader(SpectrogramDataset(val_df), batch_size=best_config["batch_size"])
+
+model = CNN(dropout=best_config["dropout"]).to(DEVICE)
+optimizer = torch.optim.Adam(model.parameters(), lr=best_config["lr"])
+
+best_f1 = 0
+EPOCHS = 25
 
 train_losses = []
 val_losses = []
@@ -170,7 +244,6 @@ for epoch in range(EPOCHS):
     train_loss = running_loss / len(train_loader)
     train_losses.append(train_loss)
 
-    # VALIDATION
     model.eval()
     all_preds, all_labels = [], []
     val_loss = 0
@@ -214,6 +287,8 @@ model.eval()
 
 all_preds, all_labels, all_holes = [], [], []
 
+test_loader = DataLoader(SpectrogramDataset(test_df), batch_size=best_config["batch_size"])
+
 with torch.no_grad():
     for x, y, hole_idx in test_loader:
         x = x.to(DEVICE)
@@ -250,69 +325,58 @@ print("AUC:", auc)
 
 # Confusion Matrix
 cm = confusion_matrix(all_labels, preds_bin)
-sns.heatmap(cm, annot=True, fmt="d")
-plt.savefig(RESULT_DIR / "confusion_matrix.png")
+plt.figure(figsize=(6,5), dpi=300)
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.title(f"Confusion Matrix ({TARGET})")
+plt.tight_layout()
+plt.savefig(RESULT_DIR / f"confusion_matrix_{TARGET}.png")
 plt.close()
 
-# ROC
+# ROC Curve
 fpr, tpr, _ = roc_curve(all_labels, all_preds)
-plt.plot(fpr, tpr)
+plt.figure(figsize=(6,5), dpi=300)
+plt.plot(fpr, tpr, label=f"AUC = {auc:.3f}")
 plt.plot([0,1],[0,1],'--')
-plt.savefig(RESULT_DIR / "roc_curve.png")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title(f"ROC Curve ({TARGET})")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig(RESULT_DIR / f"roc_curve_{TARGET}.png")
 plt.close()
 
-# =========================================
-# PREDICTION VS TIME (MELHORADO)
-# =========================================
-
+# Prediction vs Time
 holes = np.array(all_holes)
 probs = np.array(all_preds)
 labels = np.array(all_labels)
 
 order = np.argsort(holes)
 
-holes_sorted = holes[order]
-probs_sorted = probs[order]
-labels_sorted = labels[order]
-
-plt.figure(figsize=(10,5))
-
-# Scatter com cores por classe
-plt.scatter(
-    holes_sorted,
-    probs_sorted,
-    c=labels_sorted,
-    cmap="coolwarm",  # azul = 0 | vermelho = 1
-    alpha=0.5,
-    s=15,
-    label="Samples"
-)
-
-# Média móvel (tendência)
-window = 20
-rolling_mean = pd.Series(probs_sorted).rolling(window).mean()
-
-plt.plot(
-    holes_sorted,
-    rolling_mean,
-    linewidth=2,
-    label="Trend (moving average)"
-)
-
+plt.figure(figsize=(10,5), dpi=300)
+plt.plot(holes[order], probs[order], label="Predicted Probability")
+plt.scatter(holes[order], labels[order], color="red", label="Actual Failure")
 plt.xlabel("Hole Index (Tool Life)")
 plt.ylabel("Failure Probability")
 plt.title(f"Prediction vs Time ({TARGET})")
-
 plt.legend()
-plt.grid()
-
+plt.grid(alpha=0.3)
+plt.ylim(0,1)
 plt.tight_layout()
-plt.savefig(RESULT_DIR / "prediction_vs_time.png")
+plt.savefig(RESULT_DIR / f"prediction_vs_time_{TARGET}.png")
 plt.close()
 
-# Loss
-plt.plot(train_losses, label="train")
-plt.plot(val_losses, label="val")
+# Loss curve
+plt.figure(figsize=(6,5), dpi=300)
+plt.plot(train_losses, label="Train Loss")
+plt.plot(val_losses, label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Training vs Validation Loss")
 plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
 plt.savefig(RESULT_DIR / "loss_curve.png")
 plt.close()
